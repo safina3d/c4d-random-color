@@ -1,4 +1,4 @@
-#RandomColor
+# RandomColor
 ### Cinema 4D Python Plugin
 
 - Assign random color to selected or all objects
