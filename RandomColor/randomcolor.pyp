@@ -1,3 +1,6 @@
+# Author: safina3d
+# Url: https://safina3d.blogspot.com
+# Repo: https://github.com/safina3d/c4d-random-color
 import os
 import c4d
 from c4d import bitmaps, plugins, Vector, BaseMaterial
@@ -162,7 +165,7 @@ if __name__ == '__main__':
 
     plugins.RegisterCommandPlugin(
         id=1039792,
-        str='Convert color to material',
+        str='Convert display color to material',
         info=0,
         icon=Utils.get_icon_instance('color_to_material.tif'),
         help='Convert display colors to materials',
