@@ -15,5 +15,15 @@ Clone the project or download the zip file and extract it into the Maxon plugins
 - Windows: `C:\Program Files\MAXON\CINEMA 4D R<version>\plugins\`
 - MacOS: `/Applications/MAXON/CINEMA 4D R1<version>/plugins/`
 
+
+#### Changelog:
+- V1.1:
+	- [Feature] Material channels selection
+
+- V1.0:
+    - Plugin version created (based on the random color script)
+    - Source code cleaned
+
+
 #### More informations:
-- Please visit : `https://safina3d.blogspot.com`
+- Please visit : [Safina3D Homepage](https://safina3d.blogspot.com "Visit Safina3D")
