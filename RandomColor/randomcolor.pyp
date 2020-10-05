@@ -1,4 +1,5 @@
 # Author: safina3d
+# Version: 1.2
 # Url: https://safina3d.blogspot.com
 # Repo: https://github.com/safina3d/c4d-random-color
 
@@ -68,7 +69,7 @@ class Helper:
             c4d.MATERIAL_NORMAL_SHADER,
             c4d.MATERIAL_ALPHA_SHADER,
             c4d.MATERIAL_DISPLACEMENT_SHADER,
-    ]
+        ]
 
     @staticmethod
     def is_reflection_layer(prop):
@@ -119,7 +120,7 @@ class Helper:
             # Retrieve current object color and assign it to the created material
             offset = 0
             object_color = obj[c4d.ID_BASEOBJECT_COLOR]
-            for i in xrange(Helper.MATERIAL_CHANNELS_COUNT):
+            for i in range(Helper.MATERIAL_CHANNELS_COUNT):
                 is_active_channel = settings[offset]
                 apply_color = settings[offset + 1]
                 if is_active_channel:
@@ -128,7 +129,7 @@ class Helper:
                         channel_propertie = Helper.MATERIAL_CHANNELS_PROPERTIES[i]
                         # Shader color case
                         if Helper.is_shader(channel_propertie):
-                            shader = c4d.BaseList2D(c4d.Xcolor)
+                            shader = BaseList2D(c4d.Xcolor)
                             shader[c4d.COLORSHADER_COLOR] = object_color
                             material[channel_propertie] = shader
                             material.InsertShader(shader)
@@ -177,7 +178,7 @@ class RcColor(RandomColor):
     def perform(self, doc):
         """ Assign a random color to selected objects """
         used_colors_list = []
-        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_SELECTIONORDER)
+        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
 
         if len(selected_objects) > 0:
             for obj in selected_objects:
@@ -195,7 +196,7 @@ class RcUncolor(RandomColor):
 
     def perform(self, doc):
         """ Disable display color """
-        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_SELECTIONORDER)
+        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
 
         if len(selected_objects) > 0:
             for obj in selected_objects:
@@ -226,7 +227,7 @@ class RcConvertSettingsGUI(gui.GeDialog):
         # Handle save button behaviour
         if id == RcConvertSettingsGUI.ID_BTN_SAVE:
             offset = 0
-            for idx in xrange(Helper.MATERIAL_CHANNELS_COUNT):
+            for idx in range(Helper.MATERIAL_CHANNELS_COUNT):
                 RcConvert.SETTINGS[offset] = self.GetBool(RcConvertSettingsGUI.ID_CHECKBOX_REF + offset)
                 RcConvert.SETTINGS[offset + 1] = self.GetBool(RcConvertSettingsGUI.ID_CHECKBOX_REF + offset + 1)
                 offset += 2
@@ -256,7 +257,7 @@ class RcConvert(RandomColor):
 
     def perform(self, doc):
         """ Convert display colors to materials """
-        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_SELECTIONORDER)
+        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
 
         if len(selected_objects) > 0:
             for obj in selected_objects:

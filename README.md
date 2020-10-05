@@ -1,6 +1,6 @@
 # RandomColor
 #### Cinema 4D Python Plugin
-#### Version 1.1
+#### Version 1.2
 
 ![randomcolor](https://4.bp.blogspot.com/-kTlwzVkd8wI/Wd1alCMQ3CI/AAAAAAAAB24/CeAjj5Y7gWgt5GrglCwIaGggVgeh7sdrACKgBGAs/s1600/menu.png "RandomColor")
 
@@ -17,6 +17,10 @@ Clone the project or download the zip file and extract it into the Maxon plugins
 
 
 #### Changelog:
+- V1.2:
+    - [Feature] Apply random color to children
+    - [Fix] R23 Support added
+
 - V1.1:
 	- [Feature] Material channels selection
 
