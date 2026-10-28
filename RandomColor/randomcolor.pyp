@@ -1,19 +1,21 @@
 # Author: safina3d
-# Version: 1.2
+# Version: 1.3
 # Url: https://safina3d.blogspot.com
 # Repo: https://github.com/safina3d/c4d-random-color
+# Compatibility: Cinema 4D R20+ (Python 2.7 and Python 3)
 
 import os
+import colorsys
+import random
 import c4d
-from c4d import bitmaps, plugins, Vector, BaseList2D, gui
-from random import randint
+from c4d import bitmaps, plugins, Vector, gui
 
-IS_NEW_C4D_VERSION = c4d.GetC4DVersion() > 18000
+PLUGIN_ID_COLOR = 1039790
+PLUGIN_ID_UNCOLOR = 1039791
+PLUGIN_ID_CONVERT = 1039792
 
-if IS_NEW_C4D_VERSION:
-    from c4d import Material as C4dMaterial
-else:
-    from c4d import BaseMaterial as C4dMaterial
+# Golden ratio conjugate: successive hues are spread evenly around the color wheel
+GOLDEN_RATIO_CONJUGATE = 0.618033988749895
 
 
 class Utils:
@@ -27,61 +29,46 @@ class Utils:
         return icon
 
 
+class ColorGenerator(object):
+    """ Generate visually distinct colors without collision checks """
+
+    # Saturation/value pairs cycled to add contrast between consecutive colors
+    SHADES = ((0.75, 0.95), (0.55, 0.75), (0.9, 0.85))
+
+    def __init__(self, start_hue=None):
+        self.hue = random.random() if start_hue is None else start_hue
+        self.index = 0
+
+    def next_color(self):
+        """ Return the next color as c4d.Vector """
+        self.hue = (self.hue + GOLDEN_RATIO_CONJUGATE) % 1.0
+        saturation, value = ColorGenerator.SHADES[self.index % len(ColorGenerator.SHADES)]
+        self.index += 1
+        return Vector(*colorsys.hsv_to_rgb(self.hue, saturation, value))
+
+
 class Helper:
 
-    MATERIAL_CHANNELS = [
-        c4d.MATERIAL_USE_COLOR,
-        c4d.MATERIAL_USE_DIFFUSION,
-        c4d.MATERIAL_USE_LUMINANCE,
-        c4d.MATERIAL_USE_TRANSPARENCY,
-        c4d.MATERIAL_USE_REFLECTION,
-        c4d.MATERIAL_USE_ENVIRONMENT,
-        c4d.MATERIAL_USE_FOG,
-        c4d.MATERIAL_USE_BUMP,
-        c4d.MATERIAL_USE_NORMAL,
-        c4d.MATERIAL_USE_ALPHA,
-        c4d.MATERIAL_USE_GLOW,
-        c4d.MATERIAL_USE_DISPLACEMENT
-    ]
+    CHANNEL_COLOR, CHANNEL_SHADER, CHANNEL_REFLECTION = range(3)
 
-    MATERIAL_CHANNELS_PROPERTIES = [
-        c4d.MATERIAL_COLOR_COLOR,
-        c4d.MATERIAL_DIFFUSION_SHADER,
-        c4d.MATERIAL_LUMINANCE_COLOR,
-        c4d.MATERIAL_TRANSPARENCY_COLOR,
-        c4d.REFLECTION_LAYER_COLOR_COLOR,
-        c4d.MATERIAL_ENVIRONMENT_COLOR,
-        c4d.MATERIAL_FOG_COLOR,
-        c4d.MATERIAL_BUMP_SHADER,
-        c4d.MATERIAL_NORMAL_SHADER,
-        c4d.MATERIAL_ALPHA_SHADER,
-        c4d.MATERIAL_GLOW_COLOR,
-        c4d.MATERIAL_DISPLACEMENT_SHADER
-    ]
+    # (channel activation ID, channel color parameter ID, how the color is applied)
+    # Order must match the dialog rows (res/dialogs/dlg_settings.res)
+    MATERIAL_CHANNELS = (
+        (c4d.MATERIAL_USE_COLOR, c4d.MATERIAL_COLOR_COLOR, CHANNEL_COLOR),
+        (c4d.MATERIAL_USE_DIFFUSION, c4d.MATERIAL_DIFFUSION_SHADER, CHANNEL_SHADER),
+        (c4d.MATERIAL_USE_LUMINANCE, c4d.MATERIAL_LUMINANCE_COLOR, CHANNEL_COLOR),
+        (c4d.MATERIAL_USE_TRANSPARENCY, c4d.MATERIAL_TRANSPARENCY_COLOR, CHANNEL_COLOR),
+        (c4d.MATERIAL_USE_REFLECTION, c4d.REFLECTION_LAYER_COLOR_COLOR, CHANNEL_REFLECTION),
+        (c4d.MATERIAL_USE_ENVIRONMENT, c4d.MATERIAL_ENVIRONMENT_COLOR, CHANNEL_COLOR),
+        (c4d.MATERIAL_USE_FOG, c4d.MATERIAL_FOG_COLOR, CHANNEL_COLOR),
+        (c4d.MATERIAL_USE_BUMP, c4d.MATERIAL_BUMP_SHADER, CHANNEL_SHADER),
+        (c4d.MATERIAL_USE_NORMAL, c4d.MATERIAL_NORMAL_SHADER, CHANNEL_SHADER),
+        (c4d.MATERIAL_USE_ALPHA, c4d.MATERIAL_ALPHA_SHADER, CHANNEL_SHADER),
+        (c4d.MATERIAL_USE_GLOW, c4d.MATERIAL_GLOW_COLOR, CHANNEL_COLOR),
+        (c4d.MATERIAL_USE_DISPLACEMENT, c4d.MATERIAL_DISPLACEMENT_SHADER, CHANNEL_SHADER),
+    )
 
     MATERIAL_CHANNELS_COUNT = len(MATERIAL_CHANNELS)
-
-    @staticmethod
-    def is_shader(prop):
-        return prop in [
-            c4d.MATERIAL_DIFFUSION_SHADER,
-            c4d.MATERIAL_BUMP_SHADER,
-            c4d.MATERIAL_NORMAL_SHADER,
-            c4d.MATERIAL_ALPHA_SHADER,
-            c4d.MATERIAL_DISPLACEMENT_SHADER,
-        ]
-
-    @staticmethod
-    def is_reflection_layer(prop):
-        return prop == c4d.REFLECTION_LAYER_COLOR_COLOR and IS_NEW_C4D_VERSION
-
-    @staticmethod
-    def get_random_color():
-        """ Return a random color as c4d.Vector """
-        def get_random_value():
-            """ Return a random value between 0.0 and 1.0 """
-            return randint(0, 255) / 256.0
-        return Vector(get_random_value(), get_random_value(), get_random_value())
 
     @staticmethod
     def get_next_object(current_object):
@@ -93,65 +80,104 @@ class Helper:
         return current_object.GetNext()
 
     @staticmethod
-    def set_color(obj, used_colors):
-        """ Apply a random color to an object """
-        color = Helper.get_random_color()
-        # Check that the current color is not already used
-        while color in used_colors:
-            color = Helper.get_random_color()
-        used_colors.append(color)
-        # Apply the chosen color to the object
-        obj[c4d.ID_BASEOBJECT_USECOLOR] = c4d.ID_BASEOBJECT_USECOLOR_ALWAYS
-        obj[c4d.ID_BASEOBJECT_COLOR] = color
+    def iter_hierarchy(obj):
+        """ Yield obj and every object after it in the hierarchy (depth-first) """
+        while obj is not None:
+            yield obj
+            obj = Helper.get_next_object(obj)
 
     @staticmethod
-    def remove_color(obj):
-        """ Remove color from """
-        obj[c4d.ID_BASEOBJECT_USECOLOR] = c4d.ID_BASEOBJECT_USECOLOR_OFF
+    def iter_target_objects(doc):
+        """ Yield selected objects (with their children), or all objects if nothing is selected """
+        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
+        if selected_objects:
+            return iter(selected_objects)
+        return Helper.iter_hierarchy(doc.GetFirstObject())
 
     @staticmethod
-    def convert_display_color_to_material(doc, obj, settings):
-        display_color_is_active = obj[c4d.ID_BASEOBJECT_USECOLOR]
-        if display_color_is_active == c4d.ID_BASEOBJECT_USECOLOR_ALWAYS:
-            # Create new material
-            material = C4dMaterial(c4d.Mmaterial)
-            material.SetName(obj.GetName())
-            doc.InsertMaterial(material)
-            # Retrieve current object color and assign it to the created material
-            offset = 0
-            object_color = obj[c4d.ID_BASEOBJECT_COLOR]
-            for i in range(Helper.MATERIAL_CHANNELS_COUNT):
-                is_active_channel = settings[offset]
-                apply_color = settings[offset + 1]
-                if is_active_channel:
-                    material[Helper.MATERIAL_CHANNELS[i]] = 1
-                    if apply_color:
-                        channel_propertie = Helper.MATERIAL_CHANNELS_PROPERTIES[i]
-                        # Shader color case
-                        if Helper.is_shader(channel_propertie):
-                            shader = BaseList2D(c4d.Xcolor)
-                            shader[c4d.COLORSHADER_COLOR] = object_color
-                            material[channel_propertie] = shader
-                            material.InsertShader(shader)
-                        # Reflection layer case
-                        elif Helper.is_reflection_layer(channel_propertie):
-                            reflection_layers = material.GetReflectionPrimaryLayers()
-                            layer = material.GetReflectionLayerIndex(reflection_layers[1])
-                            material[layer.GetDataID() + c4d.REFLECTION_LAYER_COLOR_COLOR] = object_color
-                        # Basic color case
-                        else:
-                            material[channel_propertie] = object_color
-                else:
-                    material[Helper.MATERIAL_CHANNELS[i]] = 0
-                offset += 2
+    def get_display_color(doc, obj):
+        """
+        Return the display color explicitly chosen for obj, or None.
+        Only "On" (object color) and "Layer" (layer color) modes are converted;
+        "Automatic" is ignored because it only shows when the object has no material.
+        """
+        mode = obj[c4d.ID_BASEOBJECT_USECOLOR]
+        if mode == c4d.ID_BASEOBJECT_USECOLOR_ALWAYS:
+            return obj[c4d.ID_BASEOBJECT_COLOR]
+        if mode == c4d.ID_BASEOBJECT_USECOLOR_LAYER:
+            layer = obj.GetLayerObject(doc)
+            if layer is not None:
+                return layer[c4d.ID_LAYER_COLOR]
+        return None
 
-            material.Message(c4d.MSG_UPDATE)
-            material.Update(True, True)
-            # Disable display color
-            obj[c4d.ID_BASEOBJECT_USECOLOR] = c4d.ID_BASEOBJECT_USECOLOR_OFF
-            # Assign material tag to the object
-            tag = obj.MakeTag(c4d.Ttexture)
-            tag[c4d.TEXTURETAG_MATERIAL] = material
+    @staticmethod
+    def set_reflection_color(material, color):
+        """ Apply color to the primary specular layer, or to the primary reflection layer as fallback """
+        reflection_layer, specular_layer = material.GetReflectionPrimaryLayers()
+        # -1 means no layer
+        layer_index = specular_layer if specular_layer != -1 else reflection_layer
+        if layer_index == -1:
+            return
+        layer = material.GetReflectionLayerIndex(layer_index)
+        if layer is not None:
+            material[layer.GetDataID() + c4d.REFLECTION_LAYER_COLOR_COLOR] = color
+
+    @staticmethod
+    def create_material(doc, name, color, settings):
+        """ Create and insert a material using color on the channels enabled in settings """
+        material = c4d.Material(c4d.Mmaterial)
+        material.SetName(name)
+        doc.InsertMaterial(material)
+        doc.AddUndo(c4d.UNDOTYPE_NEW, material)
+
+        for index, (use_id, property_id, kind) in enumerate(Helper.MATERIAL_CHANNELS):
+            is_active = settings[2 * index]
+            apply_color = settings[2 * index + 1]
+            material[use_id] = is_active
+            if not (is_active and apply_color):
+                continue
+            if kind == Helper.CHANNEL_SHADER:
+                shader = c4d.BaseList2D(c4d.Xcolor)
+                shader[c4d.COLORSHADER_COLOR] = color
+                # The shader must belong to the material before being linked
+                material.InsertShader(shader)
+                material[property_id] = shader
+            elif kind == Helper.CHANNEL_REFLECTION:
+                Helper.set_reflection_color(material, color)
+            else:
+                material[property_id] = color
+
+        material.Message(c4d.MSG_UPDATE)
+        material.Update(True, True)
+        return material
+
+
+class Settings:
+    """ Material channels settings: one (active, apply color) pair per channel, saved in C4D preferences """
+
+    DEFAULTS = [True, True] + [False] * (2 * (Helper.MATERIAL_CHANNELS_COUNT - 1))
+
+    _values = None
+
+    @staticmethod
+    def get():
+        """ Return the settings list, loaded from preferences on first access """
+        if Settings._values is None:
+            container = plugins.GetWorldPluginData(PLUGIN_ID_CONVERT)
+            if container is None:
+                Settings._values = list(Settings.DEFAULTS)
+            else:
+                Settings._values = [container.GetBool(index, default) for index, default in enumerate(Settings.DEFAULTS)]
+        return Settings._values
+
+    @staticmethod
+    def set(values):
+        """ Store the settings and save them in preferences """
+        Settings._values = list(values)
+        container = c4d.BaseContainer()
+        for index, value in enumerate(Settings._values):
+            container.SetBool(index, value)
+        plugins.SetWorldPluginData(PLUGIN_ID_CONVERT, container, False)
 
 
 class RandomColor(plugins.CommandData):
@@ -159,9 +185,12 @@ class RandomColor(plugins.CommandData):
     def Execute(self, doc):
         c4d.StopAllThreads()
         doc.StartUndo()
-        self.perform(doc)
-        doc.EndUndo()
-        c4d.EventAdd()
+        try:
+            self.perform(doc)
+        finally:
+            # Always close the undo step, even if perform fails
+            doc.EndUndo()
+            c4d.EventAdd()
         return True
 
     def GetState(self, doc):
@@ -176,73 +205,73 @@ class RandomColor(plugins.CommandData):
 class RcColor(RandomColor):
 
     def perform(self, doc):
-        """ Assign a random color to selected objects """
-        used_colors_list = []
-        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
-
-        if len(selected_objects) > 0:
-            for obj in selected_objects:
-                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
-                Helper.set_color(obj, used_colors_list)
-        else:
-            obj = doc.GetFirstObject()
-            while obj is not None:
-                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
-                Helper.set_color(obj, used_colors_list)
-                obj = Helper.get_next_object(obj)
+        """ Assign a distinct random color to target objects """
+        color_generator = ColorGenerator()
+        for obj in Helper.iter_target_objects(doc):
+            doc.AddUndo(c4d.UNDOTYPE_CHANGE_SMALL, obj)
+            obj[c4d.ID_BASEOBJECT_USECOLOR] = c4d.ID_BASEOBJECT_USECOLOR_ALWAYS
+            obj[c4d.ID_BASEOBJECT_COLOR] = color_generator.next_color()
 
 
 class RcUncolor(RandomColor):
 
     def perform(self, doc):
         """ Disable display color """
-        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
-
-        if len(selected_objects) > 0:
-            for obj in selected_objects:
-                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
-                Helper.remove_color(obj)
-        else:
-            obj = doc.GetFirstObject()
-            while obj is not None:
-                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
-                Helper.remove_color(obj)
-                obj = Helper.get_next_object(obj)
+        for obj in Helper.iter_target_objects(doc):
+            if obj[c4d.ID_BASEOBJECT_USECOLOR] != c4d.ID_BASEOBJECT_USECOLOR_OFF:
+                doc.AddUndo(c4d.UNDOTYPE_CHANGE_SMALL, obj)
+                obj[c4d.ID_BASEOBJECT_USECOLOR] = c4d.ID_BASEOBJECT_USECOLOR_OFF
 
 
 class RcConvertSettingsGUI(gui.GeDialog):
 
-    ID_DLG_SETTINGS = 1000
-    ID_BTN_SAVE = 2000
-    ID_CHECKBOX_REF = 3000
+    # IDs defined in res/c4d_symbols.h
+    ID_DLG_SETTINGS = 1000  # DLG_SETTINGS
+    ID_BTN_SAVE = 2000  # ID_BTN_SAVE
+    ID_CHECKBOX_REF = 3000  # ID_CHOICE_00, then one (active, apply color) checkbox pair per channel
+
+    @staticmethod
+    def get_active_checkbox_id(channel_index):
+        return RcConvertSettingsGUI.ID_CHECKBOX_REF + 2 * channel_index
+
+    @staticmethod
+    def get_apply_checkbox_id(channel_index):
+        return RcConvertSettingsGUI.ID_CHECKBOX_REF + 2 * channel_index + 1
+
+    @staticmethod
+    def get_channel_index_from_active_checkbox(gadget_id):
+        """ Return the channel index if gadget_id is an "active" checkbox, otherwise None """
+        offset = gadget_id - RcConvertSettingsGUI.ID_CHECKBOX_REF
+        if 0 <= offset < 2 * Helper.MATERIAL_CHANNELS_COUNT and offset % 2 == 0:
+            return offset // 2
+        return None
 
     def InitValues(self):
-        for index, value in enumerate(RcConvert.SETTINGS):
-            self.SetBool(RcConvertSettingsGUI.ID_CHECKBOX_REF + index, value)
-            if index % 2 == 1 and not value:
-                self.Enable(RcConvertSettingsGUI.ID_CHECKBOX_REF + index, False)
+        settings = Settings.get()
+        for channel_index in range(Helper.MATERIAL_CHANNELS_COUNT):
+            is_active = settings[2 * channel_index]
+            apply_id = RcConvertSettingsGUI.get_apply_checkbox_id(channel_index)
+            self.SetBool(RcConvertSettingsGUI.get_active_checkbox_id(channel_index), is_active)
+            self.SetBool(apply_id, settings[2 * channel_index + 1])
+            # "Apply color" is only editable when its channel is active
+            self.Enable(apply_id, is_active)
         return super(RcConvertSettingsGUI, self).InitValues()
 
     def Command(self, id, msg):
-        # Handle save button behaviour
         if id == RcConvertSettingsGUI.ID_BTN_SAVE:
-            offset = 0
-            for idx in range(Helper.MATERIAL_CHANNELS_COUNT):
-                RcConvert.SETTINGS[offset] = self.GetBool(RcConvertSettingsGUI.ID_CHECKBOX_REF + offset)
-                RcConvert.SETTINGS[offset + 1] = self.GetBool(RcConvertSettingsGUI.ID_CHECKBOX_REF + offset + 1)
-                offset += 2
+            settings = []
+            for channel_index in range(Helper.MATERIAL_CHANNELS_COUNT):
+                settings.append(self.GetBool(RcConvertSettingsGUI.get_active_checkbox_id(channel_index)))
+                settings.append(self.GetBool(RcConvertSettingsGUI.get_apply_checkbox_id(channel_index)))
+            Settings.set(settings)
             self.Close()
-
-        # Handle checkboxes behaviour
-        if (id - RcConvertSettingsGUI.ID_CHECKBOX_REF) % 2 == 0:
-            cbx_state = self.GetBool(id)
-            id_next = id + 1
-            if cbx_state:
-                self.Enable(id_next, True)
-                self.SetBool(id_next, True)
-            else:
-                self.Enable(id_next, False)
-                self.SetBool(id_next, False)
+        else:
+            channel_index = RcConvertSettingsGUI.get_channel_index_from_active_checkbox(id)
+            if channel_index is not None:
+                is_active = self.GetBool(id)
+                apply_id = RcConvertSettingsGUI.get_apply_checkbox_id(channel_index)
+                self.Enable(apply_id, is_active)
+                self.SetBool(apply_id, is_active)
 
         return super(RcConvertSettingsGUI, self).Command(id, msg)
 
@@ -253,22 +282,27 @@ class RcConvertSettingsGUI(gui.GeDialog):
 class RcConvert(RandomColor):
 
     DIALOG = None
-    SETTINGS = [True, True] + [False for i in range(22)]
 
     def perform(self, doc):
-        """ Convert display colors to materials """
-        selected_objects = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
+        """ Convert display colors to materials, sharing one material per color """
+        settings = Settings.get()
+        materials_by_color = {}
+        for obj in Helper.iter_target_objects(doc):
+            color = Helper.get_display_color(doc, obj)
+            if color is None:
+                continue
 
-        if len(selected_objects) > 0:
-            for obj in selected_objects:
-                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
-                Helper.convert_display_color_to_material(doc, obj, RcConvert.SETTINGS)
-        else:
-            obj = doc.GetFirstObject()
-            while obj is not None:
-                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
-                Helper.convert_display_color_to_material(doc, obj, RcConvert.SETTINGS)
-                obj = Helper.get_next_object(obj)
+            color_key = (color.x, color.y, color.z)
+            material = materials_by_color.get(color_key)
+            if material is None:
+                material = Helper.create_material(doc, obj.GetName(), color, settings)
+                materials_by_color[color_key] = material
+
+            doc.AddUndo(c4d.UNDOTYPE_CHANGE_SMALL, obj)
+            obj[c4d.ID_BASEOBJECT_USECOLOR] = c4d.ID_BASEOBJECT_USECOLOR_OFF
+            tag = obj.MakeTag(c4d.Ttexture)
+            doc.AddUndo(c4d.UNDOTYPE_NEW, tag)
+            tag[c4d.TEXTURETAG_MATERIAL] = material
 
     def ExecuteOptionID(self, doc, plugid, subid):
         if RcConvert.DIALOG is None:
@@ -281,7 +315,7 @@ class RcConvert(RandomColor):
 if __name__ == '__main__':
 
     plugins.RegisterCommandPlugin(
-        id=1039790,
+        id=PLUGIN_ID_COLOR,
         str='Assign random color',
         info=0,
         icon=Utils.get_icon_instance('color.tif'),
@@ -290,7 +324,7 @@ if __name__ == '__main__':
     )
 
     plugins.RegisterCommandPlugin(
-        id=1039791,
+        id=PLUGIN_ID_UNCOLOR,
         str='Disable display color',
         info=0,
         icon=Utils.get_icon_instance('uncolor.tif'),
@@ -299,7 +333,7 @@ if __name__ == '__main__':
     )
 
     plugins.RegisterCommandPlugin(
-        id=1039792,
+        id=PLUGIN_ID_CONVERT,
         str='Convert display color to material',
         info=c4d.PLUGINFLAG_COMMAND_OPTION_DIALOG,
         icon=Utils.get_icon_instance('color_to_material.tif'),
