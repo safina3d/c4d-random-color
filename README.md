@@ -1,6 +1,5 @@
 # RandomColor
 #### Cinema 4D Python Plugin
-#### Version 1.3 · Compatible with Cinema 4D R20 and later
 
 ![randomcolor](https://4.bp.blogspot.com/-kTlwzVkd8wI/Wd1alCMQ3CI/AAAAAAAAB24/CeAjj5Y7gWgt5GrglCwIaGggVgeh7sdrACKgBGAs/s1600/menu.png "RandomColor")
 
